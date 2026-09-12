@@ -427,29 +427,6 @@
 		}
 	};
 
-	// 0.05s of silence, 8 kHz mono. Inline so the unlock cannot depend on a network
-	// fetch inside the gesture. It has to be real audio: a zero-length clip is a valid
-	// WAV that some browsers end instantly, and whether that counts as a play is not
-	// something to guess at when the whole point is to satisfy the autoplay policy.
-	const SILENT_WAV = 'data:audio/wav;base64,UklGRkQDAABXQVZFZm10IBAAAAABAAEAQB8AAIA+AAACABAAZGF0YSADAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA==';
-
-	const unlockAudioElement = async () => {
-		const audioElement = document.getElementById('audioElement') as HTMLAudioElement;
-		if (!audioElement) {
-			return;
-		}
-		try {
-			audioElement.muted = false;
-			audioElement.src = SILENT_WAV;
-			await audioElement.play();
-			audioElement.pause();
-			audioElement.currentTime = 0;
-		} catch (error) {
-			// Not fatal on its own: playAudio reports it if replies then fail to play.
-			console.warn('audio unlock failed', error);
-		}
-	};
-
 	const playAudio = (audio: HTMLAudioElement) => {
 		if ($showCallOverlay) {
 			return new Promise((resolve) => {
@@ -768,13 +745,6 @@
 		}
 
 		model = $models.find((m) => m.id === modelId);
-
-		// Unlock the shared <audio> element while the click that opened the call is still
-		// the current user gesture. Browsers only grant playback inside a gesture, and by
-		// the time the assistant answers there has not been one for many seconds. Playing
-		// a silent frame here marks the element as user-initiated for the rest of the
-		// session, so every later reply can play unmuted.
-		await unlockAudioElement();
 
 		startRecording();
 

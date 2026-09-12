@@ -1529,9 +1529,44 @@
 		}
 	};
 
+	// 0.05s of silence, 8 kHz mono, inlined so the unlock cannot wait on a network fetch
+	// inside a gesture. Real audio rather than a zero-length WAV: a zero-length clip is
+	// valid and some browsers end it instantly, and whether that counts as a play is not
+	// worth guessing when satisfying the autoplay policy is the entire purpose.
+	const SILENT_WAV = 'data:audio/wav;base64,UklGRkQDAABXQVZFZm10IBAAAAABAAEAQB8AAIA+AAACABAAZGF0YSADAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA==';
+
+	// Browsers only grant media playback inside a user gesture, and by the time a voice
+	// reply is ready there has not been one for many seconds. Playing a silent frame on
+	// the shared element during the user's first interaction marks it as user-initiated
+	// for the rest of the session, so replies can play unmuted afterwards.
+	//
+	// This has to hang off a real gesture. Doing it in an onMount -- even the call
+	// overlay's, which mounts from the click that opens the call -- is already too late:
+	// the handler runs a tick later, behind other awaits, and the gesture has expired.
+	// A one-time listener registered here fires *inside* whatever the user clicks first.
+	const unlockAudioPlayback = async () => {
+		const audioElement = document.getElementById('audioElement') as HTMLAudioElement;
+		if (!audioElement) {
+			return;
+		}
+		try {
+			audioElement.muted = false;
+			audioElement.src = SILENT_WAV;
+			await audioElement.play();
+			audioElement.pause();
+			audioElement.currentTime = 0;
+		} catch (error) {
+			// Not fatal on its own: playAudio reports it if replies then fail to play.
+			console.warn('audio unlock failed', error);
+		}
+	};
+
 	onMount(() => {
 		loading = true;
 		console.log('mounted');
+
+		document.addEventListener('pointerdown', unlockAudioPlayback, { once: true });
+		document.addEventListener('keydown', unlockAudioPlayback, { once: true });
 		window.addEventListener('message', onMessageHandler);
 		$socket?.on('events', chatEventHandler);
 		$socket?.on('connect', handleSocketConnect);
