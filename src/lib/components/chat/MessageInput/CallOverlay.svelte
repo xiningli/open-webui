@@ -427,6 +427,29 @@
 		}
 	};
 
+	// 0.05s of silence, 8 kHz mono. Inline so the unlock cannot depend on a network
+	// fetch inside the gesture. It has to be real audio: a zero-length clip is a valid
+	// WAV that some browsers end instantly, and whether that counts as a play is not
+	// something to guess at when the whole point is to satisfy the autoplay policy.
+	const SILENT_WAV = 'data:audio/wav;base64,UklGRkQDAABXQVZFZm10IBAAAAABAAEAQB8AAIA+AAACABAAZGF0YSADAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA==';
+
+	const unlockAudioElement = async () => {
+		const audioElement = document.getElementById('audioElement') as HTMLAudioElement;
+		if (!audioElement) {
+			return;
+		}
+		try {
+			audioElement.muted = false;
+			audioElement.src = SILENT_WAV;
+			await audioElement.play();
+			audioElement.pause();
+			audioElement.currentTime = 0;
+		} catch (error) {
+			// Not fatal on its own: playAudio reports it if replies then fail to play.
+			console.warn('audio unlock failed', error);
+		}
+	};
+
 	const playAudio = (audio: HTMLAudioElement) => {
 		if ($showCallOverlay) {
 			return new Promise((resolve) => {
@@ -453,21 +476,32 @@
 				};
 
 				audioElement.src = audio.src;
-				audioElement.muted = true;
+				// Deliberately NOT muted. This used to start muted and unmute once play()
+				// resolved — the muted-autoplay unlock — which browsers increasingly refuse:
+				// the unmute is silently ignored, play() still resolves, `onended` still
+				// fires on schedule, and the reply is inaudible while every code path
+				// reports success. Measured on Chrome 151: nine muted playbacks to one
+				// audible. Unlocking the element on the opening gesture (see
+				// unlockAudioElement) removes the need for the trick, and playing unmuted
+				// means a browser that still refuses produces a rejection we can report
+				// rather than silence we cannot see.
+				audioElement.muted = false;
 				audioElement.playbackRate = $settings.audio?.tts?.playbackRate ?? 1;
 				audioElement.onended = finish;
 				audioElement.onerror = () => finish();
 				audioElement.onpause = finish;
 
-				audioElement
-					.play()
-					.then(() => {
-						audioElement.muted = false;
-					})
-					.catch((error) => {
-						console.error(error);
-						finish(error);
-					});
+				audioElement.play().catch((error) => {
+					console.error(error);
+					if (error?.name === 'NotAllowedError') {
+						toast.error(
+							$i18n.t(
+								'The browser blocked audio playback. Allow sound for this site to hear replies.'
+							)
+						);
+					}
+					finish(error);
+				});
 			});
 		} else {
 			return Promise.resolve();
@@ -734,6 +768,13 @@
 		}
 
 		model = $models.find((m) => m.id === modelId);
+
+		// Unlock the shared <audio> element while the click that opened the call is still
+		// the current user gesture. Browsers only grant playback inside a gesture, and by
+		// the time the assistant answers there has not been one for many seconds. Playing
+		// a silent frame here marks the element as user-initiated for the rest of the
+		// session, so every later reply can play unmuted.
+		await unlockAudioElement();
 
 		startRecording();
 
