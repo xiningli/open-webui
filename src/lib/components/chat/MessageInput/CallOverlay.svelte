@@ -154,6 +154,20 @@
 	const MIN_DECIBELS = -55;
 	const VISUALIZER_BUFFER_LENGTH = 300;
 
+	// A farewell ends the call. A voice assistant that keeps listening after the user has
+	// said goodbye is a small but real defect; when the finalized transcript of an utterance
+	// is a farewell we close the call through the very same path as the End-call button,
+	// so a call still has exactly one way to end. Deliberately checked before submitPrompt:
+	// the goodbye ends the call instead of becoming a message, so it is never recorded.
+	const GOODBYE = /\b(good\s?bye|bye|see\s?you|farewell)\b/i;
+
+	const endCall = async () => {
+		await stopAudioStream();
+		await stopVideoStream();
+		showCallOverlay.set(false);
+		dispatch('close');
+	};
+
 	const transcribeHandler = async (audioBlob) => {
 		// Create a blob from the audio chunks
 		if (!audioBlob || audioBlob.size < 100) {
@@ -177,6 +191,10 @@
 			console.log(res.text);
 
 			if (res.text !== '') {
+				if (GOODBYE.test(res.text)) {
+					await endCall();
+					return;
+				}
 				const _responses = await submitPrompt(res.text, { _raw: true });
 				console.log(_responses);
 			}
@@ -1129,14 +1147,7 @@
 					aria-label={$i18n.t('End call')}
 					class="p-3 rounded-full bg-gray-50 dark:bg-gray-900"
 					on:click={async () => {
-						await stopAudioStream();
-						await stopVideoStream();
-
-						console.log(audioStream);
-						console.log(cameraStream);
-
-						showCallOverlay.set(false);
-						dispatch('close');
+						await endCall();
 					}}
 					type="button"
 				>
