@@ -161,6 +161,12 @@
 	const GOODBYE = /\b(good\s?bye|bye|see\s?you|farewell)\b/i;
 	let farewell = false; // set on a farewell turn; consumed when that turn's reply finishes
 
+	// Saying "stop" while the assistant is speaking interrupts it. The mic is kept live
+	// during a reply (see analyseAudio) so the word can be heard; a "stop" transcribed over
+	// the reply halts it (see transcribeHandler) instead of becoming a new prompt.
+	const STOP = /\bstop\b/i;
+	let heardWhileSpeaking = false; // this utterance began while the assistant was speaking
+
 	const endCall = async () => {
 		await stopAudioStream();
 		await stopVideoStream();
@@ -191,6 +197,26 @@
 			console.log(res.text);
 
 			if (res.text !== '') {
+				// Spoken over the assistant's reply (interrupt-on-any-sound off): the only thing
+				// that acts is "stop", which halts the reply. Anything else said over it is
+				// dropped rather than queued as a new prompt — the same as the old behaviour of
+				// suppressing the mic during a reply, except that now "stop" gets through.
+				if (heardWhileSpeaking && !($settings?.voiceInterruption ?? false)) {
+					heardWhileSpeaking = false;
+					if (STOP.test(res.text)) {
+						// A hard stop: abort the play loop and drop any sentences already queued,
+						// then stop the audio — otherwise the reply would resume with whatever was
+						// still in the queue, since stopAllAudio alone only ends the current one.
+						if (audioAbortController) {
+							audioAbortController.abort();
+						}
+						messages = {};
+						await stopAllAudio();
+					}
+					return;
+				}
+				heardWhileSpeaking = false;
+
 				// A farewell is answered, not cut off: mark the turn and let it be submitted
 				// like any other, so the model gets to say goodbye back. The call is closed
 				// later, when this turn's reply has finished speaking.
@@ -340,8 +366,11 @@
 					return;
 				}
 
-				if (muted || (assistantSpeaking && !($settings?.voiceInterruption ?? false))) {
-					// Suppress mic input when muted or when assistant is speaking without interruption enabled
+				if (muted) {
+					// Suppress mic input only when muted. The mic stays live while the assistant
+					// speaks so a spoken "stop" can be heard and interrupt it (see
+					// transcribeHandler). Previously it was also suppressed during a reply unless
+					// voiceInterruption was on.
 					analyser.maxDecibels = 0;
 					analyser.minDecibels = -1;
 				} else {
@@ -355,7 +384,7 @@
 				// Calculate RMS level from time domain data
 				rmsLevel = calculateRMS(timeDomainData);
 
-				if (muted || (assistantSpeaking && !($settings?.voiceInterruption ?? false))) {
+				if (muted) {
 					rmsLevel = 0;
 				}
 
@@ -370,7 +399,14 @@
 
 					if (!hasStartedSpeaking) {
 						hasStartedSpeaking = true;
-						stopAllAudio();
+						// Remember whether the assistant was mid-reply when this utterance began.
+						// If it was, do NOT cut it off on the first sound: wait to hear whether the
+						// word was "stop" (transcribeHandler). Barge in immediately only when nothing
+						// is playing, or when the user opted into interrupt-on-any-sound.
+						heardWhileSpeaking = assistantSpeaking;
+						if (!assistantSpeaking || ($settings?.voiceInterruption ?? false)) {
+							stopAllAudio();
+						}
 					}
 
 					lastSoundTime = Date.now();
