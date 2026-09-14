@@ -154,12 +154,12 @@
 	const MIN_DECIBELS = -55;
 	const VISUALIZER_BUFFER_LENGTH = 300;
 
-	// A farewell ends the call. A voice assistant that keeps listening after the user has
-	// said goodbye is a small but real defect; when the finalized transcript of an utterance
-	// is a farewell we close the call through the very same path as the End-call button,
-	// so a call still has exactly one way to end. Deliberately checked before submitPrompt:
-	// the goodbye ends the call instead of becoming a message, so it is never recorded.
+	// A farewell ends the call, but not mid-word. When the finalized transcript of an
+	// utterance is a farewell we let the model answer and speak, and close the call only
+	// once its reply has finished playing (see monitorAndPlayAudio). The close goes through
+	// the very same path as the End-call button, so a call still has exactly one way to end.
 	const GOODBYE = /\b(good\s?bye|bye|see\s?you|farewell)\b/i;
+	let farewell = false; // set on a farewell turn; consumed when that turn's reply finishes
 
 	const endCall = async () => {
 		await stopAudioStream();
@@ -191,9 +191,11 @@
 			console.log(res.text);
 
 			if (res.text !== '') {
+				// A farewell is answered, not cut off: mark the turn and let it be submitted
+				// like any other, so the model gets to say goodbye back. The call is closed
+				// later, when this turn's reply has finished speaking.
 				if (GOODBYE.test(res.text)) {
-					await endCall();
-					return;
+					farewell = true;
 				}
 				const _responses = await submitPrompt(res.text, { _raw: true });
 				console.log(_responses);
@@ -629,6 +631,13 @@
 			} else if (finishedMessages[id] && messages[id] && messages[id].length === 0) {
 				// If the message is finished and there are no more messages to process, break the loop
 				assistantSpeaking = false;
+				// The assistant has just finished speaking. If this reply answered a farewell,
+				// close the call now — after the model has had its say, not the instant the
+				// user said goodbye.
+				if (farewell) {
+					farewell = false;
+					await endCall();
+				}
 				break;
 			} else {
 				// No messages to process, sleep for a bit
