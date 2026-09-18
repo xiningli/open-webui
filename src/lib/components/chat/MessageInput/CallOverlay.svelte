@@ -197,6 +197,16 @@
 			console.log(res.text);
 
 			if (res.text !== '') {
+				// A farewell has already been submitted and the call is closing once its reply
+				// finishes speaking. Drop anything more the mic picks up until then — above all
+				// the assistant's own farewell echoing back into a live mic — so nothing starts
+				// a new turn or, with interrupt-on-any-sound on, cuts the goodbye short. Without
+				// this the reply is severed after "Goo" and the window closes mid-word.
+				if (farewell) {
+					heardWhileSpeaking = false;
+					return;
+				}
+
 				// Spoken over the assistant's reply (interrupt-on-any-sound off): the only thing
 				// that acts is "stop", which halts the reply. Anything else said over it is
 				// dropped rather than queued as a new prompt — the same as the old behaviour of
@@ -404,7 +414,10 @@
 						// word was "stop" (transcribeHandler). Barge in immediately only when nothing
 						// is playing, or when the user opted into interrupt-on-any-sound.
 						heardWhileSpeaking = assistantSpeaking;
-						if (!assistantSpeaking || ($settings?.voiceInterruption ?? false)) {
+						// Never barge into a farewell reply: it is the last thing the assistant
+						// says before the call closes, so a sound picked up while it plays (real
+						// speech, or the reply echoing into a live mic) must not cut it off.
+						if ((!assistantSpeaking || ($settings?.voiceInterruption ?? false)) && !farewell) {
 							stopAllAudio();
 						}
 					}
